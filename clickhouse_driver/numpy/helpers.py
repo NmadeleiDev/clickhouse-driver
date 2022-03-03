@@ -7,8 +7,8 @@ def column_chunks(columns, n):
         if not isinstance(column, (np.ndarray, pd.DatetimeIndex)):
             raise TypeError(
                 'Unsupported column type: {}. '
-                'ndarray/DatetimeIndex is expected.'
-                .format(type(column))
+                'ndarray/DatetimeIndex is expected. Col sample: {}'
+                .format(type(column), column[:20])
             )
 
     # create chunk generator for every column

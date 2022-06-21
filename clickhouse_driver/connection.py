@@ -482,7 +482,7 @@ class Connection(object):
         packet.type = packet_type = read_varint(self.fin)
 
         if packet_type == ServerPacketTypes.DATA:
-            packet.block = self.receive_data()
+            packet.block = self.receive_data(may_be_use_numpy=True)
 
         elif packet_type == ServerPacketTypes.EXCEPTION:
             packet.exception = self.receive_exception()
@@ -500,8 +500,8 @@ class Connection(object):
             packet.block = self.receive_data()
 
         elif packet_type == ServerPacketTypes.LOG:
-            block = self.receive_data(raw=True)
-            log_block(block)
+            packet.block = self.receive_data(may_be_compressed=False)
+            log_block(packet.block)
 
         elif packet_type == ServerPacketTypes.END_OF_STREAM:
             self.is_query_executing = False
@@ -511,6 +511,15 @@ class Connection(object):
             packet.multistring_message = self.receive_multistring_message(
                 packet_type
             )
+
+        elif packet_type == ServerPacketTypes.PART_UUIDS:
+            packet.block = self.receive_data()
+
+        elif packet_type == ServerPacketTypes.READ_TASK_REQUEST:
+            packet.block = self.receive_data()
+
+        elif packet_type == ServerPacketTypes.PROFILE_EVENTS:
+            packet.block = self.receive_data(may_be_compressed=False)
 
         else:
             message = 'Unknown packet {} from server {}'.format(
@@ -540,13 +549,15 @@ class Connection(object):
         else:
             return BlockOutputStream(self.fout, self.context)
 
-    def receive_data(self, raw=False):
+    def receive_data(self, may_be_compressed=True, may_be_use_numpy=False):
         revision = self.server_info.revision
 
         if revision >= defines.DBMS_MIN_REVISION_WITH_TEMPORARY_TABLES:
             read_binary_str(self.fin)
 
-        return (self.block_in_raw if raw else self.block_in).read()
+        reader = self.block_in if may_be_compressed else self.block_in_raw
+        use_numpy = False if not may_be_use_numpy else None
+        return reader.read(use_numpy=use_numpy)
 
     def receive_exception(self):
         return read_exception(self.fin)

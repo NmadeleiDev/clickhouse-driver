@@ -33,7 +33,7 @@ class NumpyDateTimeColumnBase(NumpyColumn):
             ts = items
         else:
             timezone = self.timezone if self.timezone else self.local_timezone
-            ts = pd.to_datetime(items).tz_localize(timezone, ambiguous='NaT')
+            ts = pd.to_datetime(items).tz_localize(timezone, ambiguous='NaT', nonexistent='NaT')
 
         ts = ts.tz_convert('UTC')
         return ts.tz_localize(None).to_numpy(self.datetime_dtype)

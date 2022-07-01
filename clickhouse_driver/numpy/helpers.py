@@ -3,13 +3,28 @@ import pandas as pd
 
 
 def column_chunks(columns, n):
+    columns_casted = []
     for column in columns:
         if not isinstance(column, (np.ndarray, pd.DatetimeIndex)):
-            raise TypeError(
-                'Unsupported column type: {}. '
-                'ndarray/DatetimeIndex is expected. Col sample: {}'
-                .format(type(column), column[:20])
-            )
+            casted = None
+            if hasattr(column, 'to_numpy') and callable(column.to_numpy):
+                casted = column.to_numpy()
+            else:
+                try:
+                    casted = np.array(column)
+                except Exception as e:
+                    raise TypeError(f'Failed to call np.array(column) on colume type = {type(column)}, sample: {column[:20]}, exception: {e}')
+            if casted is None:
+                raise TypeError(
+                    'Unsupported column type: {}. '
+                    'ndarray/DatetimeIndex is expected. Col sample: {}'
+                    .format(type(column), column[:20])
+                )
+            columns_casted.append(casted)
+        else:
+            columns_casted.append(column)
+
+    columns = columns_casted
 
     # create chunk generator for every column
     chunked = [

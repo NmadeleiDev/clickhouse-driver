@@ -26,7 +26,7 @@ class Client(object):
                      for the client settings, see below). Defaults to ``None``
                      (no additional settings). See all available settings in
                      `ClickHouse docs
-                     <https://clickhouse.tech/docs/en/operations/settings/settings/>`_.
+                     <https://clickhouse.com/docs/en/operations/settings/settings/>`_.
     :param \\**kwargs: All other args are passed to the
                        :py:class:`~clickhouse_driver.connection.Connection`
                        constructor.
@@ -414,8 +414,9 @@ class Client(object):
             settings=settings
         )
 
+        columns = [re.sub(r'\W', '_', name) for name, type_ in columns]
         return pd.DataFrame(
-            {re.sub(r'\W', '_', col[0]): d for d, col in zip(data, columns)}
+            {col: d for d, col in zip(data, columns)}, columns=columns
         )
 
     def insert_dataframe(
@@ -452,6 +453,12 @@ class Client(object):
             rv = None
             if sample_block:
                 columns = [x[0] for x in sample_block.columns_with_types]
+                if len(columns) != dataframe.shape[1]:
+                    msg = 'Expected {} columns, got {}'.format(
+                        len(columns), dataframe.shape[1]
+                    )
+                    raise ValueError(msg)
+
                 data = [dataframe[column].values for column in columns]
                 rv = self.send_data(sample_block, data, columnar=True)
                 self.receive_end_of_query()
@@ -582,6 +589,9 @@ class Client(object):
             if packet.type == ServerPacketTypes.END_OF_STREAM:
                 break
 
+            elif packet.type == ServerPacketTypes.PROGRESS:
+                continue
+
             elif packet.type == ServerPacketTypes.EXCEPTION:
                 raise packet.exception
 
@@ -693,7 +703,8 @@ class Client(object):
                 kwargs[name] = asbool(value)
             elif name == 'ssl_version':
                 kwargs[name] = getattr(ssl, value)
-            elif name in ['ca_certs', 'ciphers', 'keyfile', 'certfile']:
+            elif name in ['ca_certs', 'ciphers', 'keyfile', 'certfile',
+                          'server_hostname']:
                 kwargs[name] = value
             elif name == 'alt_hosts':
                 kwargs['alt_hosts'] = value

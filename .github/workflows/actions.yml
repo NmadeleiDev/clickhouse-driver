@@ -8,15 +8,16 @@ jobs:
         use-numpy:
           - 0
         python-version:
-          - "3.5"
           - "3.6"
           - "3.7"
           - "3.8"
           - "3.9"
           - "3.10"
+          - "3.11"
           - "pypy-3.6"
           - "pypy-3.7"
         clickhouse-version:
+          - 22.9.5.25
           - 22.2.3.5
           - 21.12.3.32
           - 21.9.3.30
@@ -92,7 +93,7 @@ jobs:
         env:
           USE_NUMPY: ${{ matrix.use-numpy }}
       - name: Run tests
-        run: coverage run -m py.test --timeout=10 -v
+        run: coverage run -m pytest --timeout=10 -v
         timeout-minutes: 5
         env:
           # Set initial TZ for docker exec -e "`env | grep ^TZ`"
@@ -184,7 +185,7 @@ jobs:
           pip install --upgrade pip setuptools
           pip install cython cibuildwheel==$VERSION
         env:
-          VERSION: 2.2.2
+          VERSION: 2.11.2
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -221,7 +222,7 @@ jobs:
           pip install --upgrade pip setuptools
           pip install cython cibuildwheel==$VERSION
         env:
-          VERSION: 2.2.2
+          VERSION: 2.11.2
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -260,7 +261,7 @@ jobs:
         run: |
           pip install cibuildwheel==$env:VERSION
         env:
-          VERSION: 2.2.2
+          VERSION: 2.11.2
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -309,7 +310,7 @@ jobs:
           pip install --upgrade pip setuptools
           pip install cibuildwheel==$VERSION
         env:
-          VERSION: 2.2.2
+          VERSION: 2.11.2
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:

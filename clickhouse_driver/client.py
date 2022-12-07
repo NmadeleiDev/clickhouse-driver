@@ -1,5 +1,6 @@
 import re
 import ssl
+from collections import deque
 from contextlib import contextmanager
 from time import time
 import types
@@ -53,6 +54,9 @@ class Client(object):
                            default values if data type of this field is not
                            nullable. Does not work for NumPy. Default: False.
                            New in version *0.2.4*.
+        * ``round_robin`` -- If ``alt_hosts`` are provided the query will be
+                           executed on host picked with round-robin algorithm.
+                           New in version *0.2.5*.
     """
 
     available_client_settings = (
@@ -112,9 +116,27 @@ class Client(object):
             self.iter_query_result_cls = IterQueryResult
             self.progress_query_result_cls = ProgressQueryResult
 
-        self.connection = Connection(*args, **kwargs)
-        self.connection.context.settings = self.settings
-        self.connection.context.client_settings = self.client_settings
+        round_robin = kwargs.pop('round_robin', False)
+        self.connections = deque([Connection(*args, **kwargs)])
+
+        if round_robin and 'alt_hosts' in kwargs:
+            alt_hosts = kwargs.pop('alt_hosts')
+            for host in alt_hosts.split(','):
+                url = urlparse('clickhouse://' + host)
+
+                connection_kwargs = kwargs.copy()
+                if len(args) > 2:
+                    # port as positional argument
+                    connection_args = (url.hostname, url.port) + args[2:]
+                else:
+                    # port as keyword argument
+                    connection_args = (url.hostname, ) + args[1:]
+                    connection_kwargs['port'] = url.port
+
+                connection = Connection(*connection_args, **connection_kwargs)
+                self.connections.append(connection)
+
+        self.connection = self.get_connection()
         self.reset_last_query()
         super(Client, self).__init__()
 
@@ -124,7 +146,22 @@ class Client(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
+    def get_connection(self):
+        if hasattr(self, 'connection'):
+            self.connections.append(self.connection)
+
+        connection = self.connections.popleft()
+
+        connection.context.settings = self.settings
+        connection.context.client_settings = self.client_settings
+        return connection
+
     def disconnect(self):
+        self.disconnect_connection()
+        for connection in self.connections:
+            connection.disconnect()
+
+    def disconnect_connection(self):
         """
         Disconnects from the server.
         """
@@ -227,13 +264,29 @@ class Client(object):
         if query.lower().startswith('use '):
             self.connection.database = query[4:].strip()
 
+    def establish_connection(self, settings):
+        num_connections = len(self.connections)
+        if hasattr(self, 'connection'):
+            num_connections += 1
+
+        for i in range(num_connections):
+            try:
+                self.connection = self.get_connection()
+                self.make_query_settings(settings)
+                self.connection.force_connect()
+                self.last_query = QueryInfo()
+
+            except (errors.SocketTimeoutError, errors.NetworkError):
+                if i < num_connections - 1:
+                    continue
+                raise
+
+            return
+
     @contextmanager
     def disconnect_on_error(self, query, settings):
-        self.make_query_settings(settings)
-
         try:
-            self.connection.force_connect()
-            self.last_query = QueryInfo()
+            self.establish_connection(settings)
 
             yield
 
@@ -453,11 +506,11 @@ class Client(object):
             rv = None
             if sample_block:
                 columns = [x[0] for x in sample_block.columns_with_types]
-                if len(columns) != dataframe.shape[1]:
-                    msg = 'Expected {} columns, got {}'.format(
-                        len(columns), dataframe.shape[1]
-                    )
-                    raise ValueError(msg)
+                # raise if any columns are missing from the dataframe
+                diff = set(columns) - set(dataframe.columns)
+                if len(diff):
+                    msg = "DataFrame missing required columns: {}"
+                    raise ValueError(msg.format(list(diff)))
 
                 data = [dataframe[column].values for column in columns]
                 rv = self.send_data(sample_block, data, columnar=True)
@@ -601,6 +654,9 @@ class Client(object):
             elif packet.type == ServerPacketTypes.TABLE_COLUMNS:
                 pass
 
+            elif packet.type == ServerPacketTypes.PROFILE_EVENTS:
+                pass
+
             else:
                 message = self.connection.unexpected_packet_message(
                     'Exception, EndOfStream or Log', packet.type
@@ -614,6 +670,22 @@ class Client(object):
         return self.receive_result(with_column_types=with_column_types)
 
     def substitute_params(self, query, params, context):
+        """
+        Substitutes parameters into a provided query.
+
+        For example::
+
+            client = Client(...)
+
+            substituted_query = client.substitute_params(
+                query='SELECT 1234, %(foo)s',
+                params={'foo': 'bar'},
+                context=client.connection.context
+            )
+
+            # prints: SELECT 1234, 'bar'
+            print(substituted_query)
+        """
         if not isinstance(params, dict):
             raise ValueError('Parameters are expected in dict form')
 
@@ -685,6 +757,9 @@ class Client(object):
 
             elif name == 'use_numpy':
                 settings[name] = asbool(value)
+
+            elif name == 'round_robin':
+                kwargs[name] = asbool(value)
 
             elif name == 'client_name':
                 kwargs[name] = value
